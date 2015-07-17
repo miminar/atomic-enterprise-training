@@ -1697,9 +1697,18 @@ directory with:
 
     mkdir -p /mnt/registry
 
+Whole process is documentented in depth at
+[openshift.org](https://docs.openshift.org/latest/admin_guide/install/docker_registry.html).
+
 ### Creating user account for registry
+**Note:** This is only required if you want to use persistent storage on your
+master host using volume mount, which is highly unadvisable for production
+systems.
+
 Each pod runs under particular service account. Three such accounts are created for you
 by default in each project:
+
+[//]: # (TODO: ditch the builder service account which quite useless on AE)
 
     os get serviceaccounts
     NAME       SECRETS
@@ -1725,27 +1734,18 @@ the system. However, restricted pod does not allow you to mount host directory. 
 registry pod needs be run under *privileged* service account. Since all currently
 existing have already their use, let's set up a new one as `root`:
 
-    oc create -f - <<EOF
-    apiVersion: v1
-    kind: ServiceAccount
-    metadata:
-      name: registry
-    EOF
+    echo '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"registry"}}' \
+        | oc create -f -
 
 Next step is to make it *privileged*. This is achieved by adding service
-account's user name to a list of users of *privileged* SCC. Such a name looks
-like this:
+account's user name to a list of users of *privileged* SCC.
 
-    system:serviceaccount:<namespace>:<name>
+    oc edit scc privileged
 
-Where `<namespace>` is `default` because we set up registry in the *default*
-namespace and `<name>` is whatever we used in previous `oc create` command.
+Add a line under `users` with a user name
+`system:serviceaccount:default:registry`.
 
-Type following command and add the user name:
-
-    oc edit scc priveliged
-
-After the addition, the schema will look like this:
+After the addition, you'll see somthing like this:
 
     allowHostDirVolumePlugin: true
     allowPrivilegedContainer: true
@@ -1769,7 +1769,7 @@ After the addition, the schema will look like this:
     - system:serviceaccount:default:registry-account
 
 ### Creating the registry
-`oadm registry` command will do the rest for us:
+`oadm registry` command will do the rest for you:
 
 [//]: # (TODO: fix the ca path)
 [//]: # (TODO: fix the image path)
@@ -1777,10 +1777,17 @@ After the addition, the schema will look like this:
     oadm registry --create \
     --credentials=/etc/openshift/master/openshift-registry.kubeconfig \
     --images='registry.access.redhat.com/openshift3/ose-${component}:latest' \
-    --selector="region=infra" --service-account=registry --mount-host=/mnt/registry
+    --selector="region=infra" --service-account=registry \
+    --mount-host=/mnt/registry
 
 **Note:** the use of `--service-account=registry` specifying service account
-we've just created.
+you've just created.
+
+**Be warned** that `--mount-host` option poses great security risk as it requires
+you to run registry in priviliged containers. Moreover it doesn't scale. We
+recommend using [parsistent storage on
+NFS](https://docs.openshift.org/latest/admin_guide/persistent_storage_nfs.html)
+for production systems.
 
 You'll get output like:
 
