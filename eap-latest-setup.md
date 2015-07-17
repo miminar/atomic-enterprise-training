@@ -1286,7 +1286,7 @@ admins.
 
 Ensure that port 1936 is accessible and visit:
 
-    http://admin:cEVu2hUb@ae-master.example.com:1936 
+    http://admin:cEVu2hUb@ae-master.example.com:1936
 
 to view your router stats.
 
@@ -1697,9 +1697,79 @@ directory with:
 
     mkdir -p /mnt/registry
 
+### Creating user account for registry
+Each pod runs under particular service account. Three such accounts are created for you
+by default in each project:
+
+    os get serviceaccounts
+    NAME       SECRETS
+    builder    2
+    default    2
+    deployer   2
+
+`builder` service account is required by builder pods and `deployer` by
+deployment pods. The `default` is used for all the other pods unless
+overridden.
+
+Each service account can be given security context constraints (SCC). They
+allow to specify SELinux context for pods, limit users used to run them etc.
+To list them, type:
+
+    oc get scc
+    NAME         PRIV      CAPS      HOSTDIR   SELINUX     RUNASUSER
+    privileged   true      []        true      RunAsAny    RunAsAny
+    restricted   false     []        false     MustRunAs   MustRunAsRange
+
+By default, newly created pods are *restricted* which protects users from compromising
+the system. However, restricted pod does not allow you to mount host directory. The
+registry pod needs be run under *privileged* service account. Since all currently
+existing have already their use, let's set up a new one as `root`:
+
+    oc create -f - <<EOF
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: registry
+    EOF
+
+Next step is to make it *privileged*. This is achieved by adding service
+account's user name to a list of users of *privileged* SCC. Such a name looks
+like this:
+
+    system:serviceaccount:<namespace>:<name>
+
+Where `<namespace>` is `default` because we set up registry in the *default*
+namespace and `<name>` is whatever we used in previous `oc create` command.
+
+Type following command and add the user name:
+
+    oc edit scc priveliged
+
+After the addition, the schema will look like this:
+
+    allowHostDirVolumePlugin: true
+    allowPrivilegedContainer: true
+    apiVersion: v1
+    groups:
+    - system:cluster-admins
+    - system:nodes
+    kind: SecurityContextConstraints
+    metadata:
+      creationTimestamp: 2015-07-13T12:50:17Z
+      name: privileged
+      resourceVersion: "2495"
+      selfLink: /api/v1/securitycontextconstraints/privileged
+      uid: b6c8daa4-295d-11e5-a72c-525400a4dc47
+    runAsUser:
+      type: RunAsAny
+    seLinuxContext:
+      type: RunAsAny
+    users:
+    - system:serviceaccount:openshift-infra:build-controller
+    - system:serviceaccount:default:registry-account
+
 ### Creating the registry
-`oadm` again comes to our rescue with a handy installer for the
-registry. As the `root` user, run the following:
+`oadm registry` command will do the rest for us:
 
 [//]: # (TODO: fix the ca path)
 [//]: # (TODO: fix the image path)
@@ -1707,7 +1777,10 @@ registry. As the `root` user, run the following:
     oadm registry --create \
     --credentials=/etc/openshift/master/openshift-registry.kubeconfig \
     --images='registry.access.redhat.com/openshift3/ose-${component}:latest' \
-    --selector="region=infra" --mount-host=/mnt/registry
+    --selector="region=infra" --service-account=registry --mount-host=/mnt/registry
+
+**Note:** the use of `--service-account=registry` specifying service account
+we've just created.
 
 You'll get output like:
 
@@ -1953,7 +2026,7 @@ After several seconds, you'll see:
 
 Note that no tags are available for `ruby-hello-world`. Why? You haven't pushed
 it yet:
-    
+
     docker push $REGISTRY/openshift/ruby-hello-world
 
 Once pushed, tags will be updated automatically:
@@ -2004,7 +2077,7 @@ that it is using right environment variables, just list them:
     MYSQL_DATABASE=mydb
 
 If we'd omitted `MYSQL_*` parameters in the call to `oc process` above, we
-would have got random values similar to `ADMIN_*` parameters. 
+would have got random values similar to `ADMIN_*` parameters.
 
 ### Expose the Service
 The `oc` command has a nifty subcommand called `expose` that will take a
@@ -2019,7 +2092,7 @@ After a few moments:
 
     [alice]$ oc get route
     NAME               HOST/PORT                                       PATH      SERVICE            LABELS
-    ruby-hello-world   ruby-hello-world.wiring.cloudapps.example.com             ruby-hello-world 
+    ruby-hello-world   ruby-hello-world.wiring.cloudapps.example.com             ruby-hello-world
 
 Take a look at that hostname. It is
 
@@ -2254,7 +2327,7 @@ wildcard space:
     ;; ANSWER SECTION:
     foo.cloudapps.example.com 0 IN A 192.168.133.2
     ...
-    
+
 [//]: # (TODO: LDAP basic auth service requires STI - find a way around it)
 
 # APPENDIX - Import/Export of Docker Images (Disconnected Use)
@@ -2549,19 +2622,19 @@ configure the entire AWS environment, too.
     [OSEv3:children]
     masters
     nodes
-    
+
     [OSEv3:vars]
     deployment_type=enterprise
-    
+
     # The default user for the image used
     ansible_ssh_user=ec2-user
-    
+
     # host group for masters
     # The entries should be either the publicly accessible dns name for the host
     # or the publicly accessible IP address of the host.
     [masters]
     ec2-52-6-179-239.compute-1.amazonaws.com
-    
+
     # host group for nodes
     [nodes]
     ec2-52-6-179-239.compute-1.amazonaws.com openshift_node_labels="{'region': 'infra', 'zone': 'default'}" #The master
